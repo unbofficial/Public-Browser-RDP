@@ -1,10 +1,10 @@
-name: Public-Persistent-Browser-RDP-V3
+name: Public-Persistent-Browser-RDP-Final
 
 on:
   workflow_dispatch:
     inputs:
       auth_code:
-        description: 'Google Code (4/0A... part)'
+        description: 'Google Code (Sirf wo lamba code paste karein jo 4/0A se shuru hota hai)'
         required: true
 
 jobs:
@@ -25,26 +25,34 @@ jobs:
           $msiPath = "$env:TEMP\crd.msi"
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $msiPath
           Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait
-          Start-Sleep -Seconds 20
+          Start-Sleep -Seconds 30
 
-      - name: 3. Connect (Fixed Path Logic)
+      - name: 3. Connect (Hardcoded Path Strategy)
         shell: pwsh
         run: |
-          # Input handling without complex symbols
-          $inputCode = "${{ github.event.inputs.auth_code }}"
+          # Is line mein hum bracket wala masla khatam kar rahe hain
+          $rawInput = @"
+          ${{ github.event.inputs.auth_code }}
+          "@
           
-          # Searching for the file safely
-          $dir1 = "C:\Program Files\Google\Chrome Remote Desktop"
-          $dir2 = "C:\Program Files (x86)\Google\Chrome Remote Desktop"
+          # Sirf wo code nikalna jo 4/ se shuru hota hai (Regex logic)
+          if ($rawInput -match '4/[a-zA-Z0-9_-]+') {
+              $cleanCode = $matches[0]
+              Write-Host "✅ Clean Code Mil Gaya!"
+          } else {
+              $cleanCode = $rawInput.Trim()
+          }
+
+          # Manual Path Search (No variables that can break)
+          $exePath = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (!(Test-Path $exePath)) {
+              $exePath = Get-ChildItem -Path "C:\Program Files\Google\Chrome Remote Desktop\" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          }
           
-          $exePath = Get-ChildItem -Path $dir1, $dir2 -Filter "remoting_start_host.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          
-          if (!$exePath) { throw "CRD not found!" }
-          
-          Write-Host "✅ Path Found: $exePath"
-          
-          # Executing with arguments
-          & $exePath --code="$inputCode" --redirect-url="https://remotedesktop.google.com/_/OAuthResult" --name="GitHub-PC" --pin="${{ secrets.CRD_PIN }}"
+          if (!$exePath) { throw "CRD files not found!" }
+
+          Write-Host "Connecting..."
+          & $exePath --code="$cleanCode" --redirect-url="https://remotedesktop.google.com/_/OAuthResult" --name="GitHub-PC" --pin="${{ secrets.CRD_PIN }}"
 
       - name: 4. Create Desktop Shortcuts
         shell: pwsh
@@ -58,7 +66,7 @@ jobs:
       - name: 5. Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ Ready! Check: https://remotedesktop.google.com/access"
+          Write-Host "✅ Check: https://remotedesktop.google.com/access"
           $timeout = New-TimeSpan -Hours 6
           $sw = [diagnostics.stopwatch]::StartNew()
           while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit.txt")) { Start-Sleep -Seconds 30 }
