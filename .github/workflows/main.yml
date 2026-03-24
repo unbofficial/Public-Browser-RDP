@@ -1,10 +1,10 @@
-name: Public-Persistent-Browser-RDP-Final
+name: Public-Persistent-Browser-RDP-Pro
 
 on:
   workflow_dispatch:
     inputs:
       auth_code:
-        description: 'Google Code (Sirf wo lamba code paste karein jo 4/0A se shuru hota hai)'
+        description: 'Google Code (Sirf wo 4/0A... wala hissa copy karein)'
         required: true
 
 jobs:
@@ -19,54 +19,56 @@ jobs:
           restore-keys: |
             chrome-session-
 
-      - name: 2. Install CRD
+      - name: 2. Install CRD (Quickly)
         shell: pwsh
         run: |
           $msiPath = "$env:TEMP\crd.msi"
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $msiPath
           Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait
-          Start-Sleep -Seconds 30
+          Start-Sleep -Seconds 15
 
-      - name: 3. Connect (Hardcoded Path Strategy)
+      - name: 3. Smart Connect
         shell: pwsh
         run: |
-          # Is line mein hum bracket wala masla khatam kar rahe hain
-          $rawInput = @"
-          ${{ github.event.inputs.auth_code }}
-          "@
+          # Raw input handling
+          $raw = "${{ github.event.inputs.auth_code }}"
           
-          # Sirf wo code nikalna jo 4/ se shuru hota hai (Regex logic)
-          if ($rawInput -match '4/[a-zA-Z0-9_-]+') {
-              $cleanCode = $matches[0]
-              Write-Host "✅ Clean Code Mil Gaya!"
+          # Clean code extraction (4/ se shuru hone wala)
+          if ($raw -match '(4\/[a-zA-Z0-9_-]+)') {
+              $cleanCode = $matches[1]
+              Write-Host "✅ Clean Code Detected."
           } else {
-              $cleanCode = $rawInput.Trim()
+              $cleanCode = $raw.Trim()
           }
 
-          # Manual Path Search (No variables that can break)
-          $exePath = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (!(Test-Path $exePath)) {
-              $exePath = Get-ChildItem -Path "C:\Program Files\Google\Chrome Remote Desktop\" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
-          }
+          # Dynamic Path Search
+          $exePath = Get-ChildItem -Path "C:\Program Files" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (!$exePath) { $exePath = Get-ChildItem -Path "C:\Program Files (x86)" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName }
+
+          Write-Host "🚀 Attempting Connection..."
           
-          if (!$exePath) { throw "CRD files not found!" }
+          # Execute connection
+          & $exePath --code="$cleanCode" --redirect-url="https://remotedesktop.google.com/_/OAuthResult" --name="GitHub-PC" --pin="${{ secrets.CRD_PIN }}" --suppress-show-confirmation-dialog
 
-          Write-Host "Connecting..."
-          & $exePath --code="$cleanCode" --redirect-url="https://remotedesktop.google.com/_/OAuthResult" --name="GitHub-PC" --pin="${{ secrets.CRD_PIN }}"
+          Write-Host "Waiting 30 seconds for verification..."
+          Start-Sleep -Seconds 30
 
-      - name: 4. Create Desktop Shortcuts
+      - name: 4. Create Desktop Tools
         shell: pwsh
         run: |
           $publicDesktop = "C:\Users\Public\Desktop"
           $dataPath = "C:\Users\Public\BrowserData"
           if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
           "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run" | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
-          "@echo off`ntaskkill /F /IM chrome.exe /T`npowershell -Command `"New-Item -Path 'C:\exit.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
+          "@echo off`ntaskkill /F /IM chrome.exe /T`npowershell -Command `"New-Item -Path 'C:\done.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
 
       - name: 5. Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ Check: https://remotedesktop.google.com/access"
+          Write-Host "✅ Check now: https://remotedesktop.google.com/access"
           $timeout = New-TimeSpan -Hours 6
           $sw = [diagnostics.stopwatch]::StartNew()
-          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit.txt")) { Start-Sleep -Seconds 30 }
+          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\done.txt")) {
+              Write-Host "RDP Active... Looking for GitHub-PC"
+              Start-Sleep -Seconds 30
+          }
