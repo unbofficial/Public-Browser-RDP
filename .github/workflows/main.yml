@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: 1. Purana Data Wapas Lao (Restore Chrome Session)
+      - name: 1. Session Restore
         uses: actions/cache@v3
         with:
           path: C:\Users\Public\BrowserData
@@ -15,53 +15,52 @@ jobs:
           restore-keys: |
             chrome-session-
 
-      - name: 2. Chrome Remote Desktop Install Karo
-        shell: pwsh
+      - name: 2. Install Chrome Remote Desktop
         run: |
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath msiexec.exe -ArgumentList "/i crd.msi /quiet /qn /norestart" -Wait
 
-      - name: 3. Google Se Connect Aur Session Restore Setup
+      - name: 3. Setup and Connect
         shell: pwsh
         run: |
-          # Chrome Data Folder Banana
-          $dataPath = "C:\Users\Public\BrowserData"
-          if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
-          
-          # Google Connection
+          # Yahan hum aapka secret check karenge
           $command = '${{ secrets.CRD_COMMAND }}'
-          $code = [regex]::match($command, '--code="([^"]+)"').Groups[1].Value
-          $path = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (!(Test-Path $path)) { $path = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" }
           
-          Start-Process -FilePath $path -ArgumentList "--code=`"$code`" --redirect-url=`"https://remotedesktop.google.com/_/OAuthResult`" --name=`"GitHub-PC`" -pin=`"${{ secrets.CRD_PIN }}`"" -Wait
+          # Code nikalne ka asaan tarika
+          if ($command -match '--code="([^"]+)"') {
+              $authCode = $matches[1]
+              Write-Host "✅ Code Mil Gaya: $authCode"
+          } else {
+              Write-Error "❌ Masla: CRD_COMMAND secret mein sahi code nahi mila!"
+              exit 1
+          }
 
-      - name: 4. Desktop Par Shortcuts Banana
-        shell: pwsh
+          # Host ko start karna
+          $params = @(
+              "--code=$authCode",
+              "--redirect-url=https://remotedesktop.google.com/_/OAuthResult",
+              "--name=GitHub-PC",
+              "--pin=${{ secrets.CRD_PIN }}"
+          )
+
+          $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          Start-Process -FilePath $exePath -ArgumentList $params -Wait
+          
+      - name: 4. Create Desktop Tools
         run: |
           $publicDesktop = "C:\Users\Public\Desktop"
           $dataPath = "C:\Users\Public\BrowserData"
-          
-          # Launcher Script (Jo aapka session restore karega)
-          $chromeCmd = "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run --no-default-browser-check"
-          $chromeCmd | Out-File "$publicDesktop\RESTORE_CHROME.bat" -Encoding ascii
-          
-          # Stop Script
-          $stopCmd = "@echo off`ntaskkill /F /IM chrome.exe /T`necho Data Saved! Closing...`npowershell -Command `"New-Item -Path 'C:\done.txt' -ItemType File`""
-          $stopCmd | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
+          if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
 
-      - name: 5. Keep Alive (6 Hours & Save Check)
-        shell: pwsh
+          "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run" | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
+          "@echo off`ntaskkill /F /IM chrome.exe /T`npowershell -Command `"New-Item -Path 'C:\exit.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
+
+      - name: 5. Keep Alive
         run: |
-          Write-Host "✅ Sab set hai! Browser mein link kholiye: https://remotedesktop.google.com/access"
-          Write-Host "PIN: ${{ secrets.CRD_PIN }}"
-          
+          Write-Host "Checking connection..."
           $timeout = New-TimeSpan -Hours 6
-          $sw = [diagnostics.stopwatch]::StartNew()
-          
-          # Ye loop 6 ghante tak chalega ya jab tak aap SAVE_AND_EXIT nahi dabate
-          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\done.txt")) {
-            Write-Host "RDP Active... Time Elapsed: $($sw.Elapsed.ToString('hh\:mm\:ss'))"
-            Start-Sleep -Seconds 60
+          $stopwatch = [diagnostics.stopwatch]::StartNew()
+          while ($stopwatch.Elapsed -lt $timeout -and !(Test-Path "C:\exit.txt")) {
+              Write-Host "RDP is Live. Check: https://remotedesktop.google.com/access"
+              Start-Sleep -Seconds 60
           }
-          Write-Host "Closing and Saving Cache..."
