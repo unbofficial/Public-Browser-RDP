@@ -7,31 +7,42 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: 1. Session Restore
+      - name: 1. Purana Data Wapas Lao (Restore Chrome Session)
         uses: actions/cache@v3
         with:
           path: C:\Users\Public\BrowserData
+          # Har baar naya key banega taaki latest data save ho sake
           key: chrome-session-${{ github.run_id }}
           restore-keys: |
             chrome-session-
 
-      - name: 2. Install Chrome Remote Desktop
-        run: |
-          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
-          Start-Process -FilePath msiexec.exe -ArgumentList "/i crd.msi /quiet /qn /norestart" -Wait
-
-      - name: 3. Setup and Connect
+      - name: 2. Chrome Remote Desktop Install Karo
         shell: pwsh
         run: |
-          # Yahan hum aapka secret check karenge
+          Write-Host "Downloading CRD..."
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          Write-Host "Installing CRD..."
+          Start-Process -FilePath msiexec.exe -ArgumentList "/i crd.msi /quiet /qn /norestart" -Wait
+          Write-Host "Installation Complete!"
+
+      - name: 3. Setup and Connect (Smart Search)
+        shell: pwsh
+        run: |
+          # Secret se code nikalna
           $command = '${{ secrets.CRD_COMMAND }}'
-          
-          # Code nikalne ka asaan tarika
           if ($command -match '--code="([^"]+)"') {
               $authCode = $matches[1]
-              Write-Host "✅ Code Mil Gaya: $authCode"
+              Write-Host "✅ Code Mil Gaya!"
           } else {
-              Write-Error "❌ Masla: CRD_COMMAND secret mein sahi code nahi mila!"
+              Write-Error "❌ Masla: CRD_COMMAND secret sahi nahi hai ya expire ho gaya hai!"
+              exit 1
+          }
+
+          # EXE file ko dhoondna (Path Fix)
+          $exePath = Get-ChildItem -Path "C:\Program Files\Google\Chrome Remote Desktop\" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+
+          if (!$exePath) {
+              Write-Error "❌ Chrome Remote Desktop ki file nahi mili!"
               exit 1
           }
 
@@ -43,24 +54,37 @@ jobs:
               "--pin=${{ secrets.CRD_PIN }}"
           )
 
-          $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          Write-Host "Connecting to Google..."
           Start-Process -FilePath $exePath -ArgumentList $params -Wait
-          
-      - name: 4. Create Desktop Tools
+
+      - name: 4. Desktop Par Shortcuts Banana
+        shell: pwsh
         run: |
           $publicDesktop = "C:\Users\Public\Desktop"
           $dataPath = "C:\Users\Public\BrowserData"
           if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
 
-          "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run" | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
-          "@echo off`ntaskkill /F /IM chrome.exe /T`npowershell -Command `"New-Item -Path 'C:\exit.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
+          # Launcher Shortcut: Is se Chrome aapka purana data uthayega
+          $chromeCmd = "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run --no-default-browser-check"
+          $chromeCmd | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
+          
+          # Save & Exit Shortcut: Isay click karte hi data save hona shuru ho jayega
+          $stopCmd = "@echo off`necho Saving Data...`ntaskkill /F /IM chrome.exe /T >nul 2>&1`npowershell -Command `"New-Item -Path 'C:\exit_signal.txt' -ItemType File`""
+          $stopCmd | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
 
-      - name: 5. Keep Alive
+      - name: 5. Keep Alive (6 Hours Max)
+        shell: pwsh
         run: |
-          Write-Host "Checking connection..."
+          Write-Host "✅ Sab Ready Hai!"
+          Write-Host "1. Is link par jayen: https://remotedesktop.google.com/access"
+          Write-Host "2. 'GitHub-PC' par click karein."
+          Write-Host "3. PIN daalein: ${{ secrets.CRD_PIN }}"
+          
           $timeout = New-TimeSpan -Hours 6
-          $stopwatch = [diagnostics.stopwatch]::StartNew()
-          while ($stopwatch.Elapsed -lt $timeout -and !(Test-Path "C:\exit.txt")) {
-              Write-Host "RDP is Live. Check: https://remotedesktop.google.com/access"
-              Start-Sleep -Seconds 60
+          $sw = [diagnostics.stopwatch]::StartNew()
+          
+          # Loop tab tak chalega jab tak aap SAVE_AND_EXIT nahi dabate ya 6 ghante pure nahi hote
+          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit_signal.txt")) {
+            Start-Sleep -Seconds 30
           }
+          Write-Host "Closing and Saving Cache..."
