@@ -7,84 +7,70 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: 1. Purana Data Wapas Lao (Restore Chrome Session)
+      - name: 1. Restore Chrome Session
         uses: actions/cache@v3
         with:
           path: C:\Users\Public\BrowserData
-          # Har baar naya key banega taaki latest data save ho sake
           key: chrome-session-${{ github.run_id }}
           restore-keys: |
             chrome-session-
 
-      - name: 2. Chrome Remote Desktop Install Karo
+      - name: 2. Install Chrome Remote Desktop
         shell: pwsh
         run: |
           Write-Host "Downloading CRD..."
-          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
-          Write-Host "Installing CRD..."
-          Start-Process -FilePath msiexec.exe -ArgumentList "/i crd.msi /quiet /qn /norestart" -Wait
-          Write-Host "Installation Complete!"
+          $msiPath = "$env:TEMP\crd.msi"
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $msiPath
+          Write-Host "Installing CRD (Quiet Mode)..."
+          $process = Start-Process -FilePath msiexec.exe -ArgumentList "/i $msiPath /quiet /qn /norestart" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { Write-Warning "Installation might have issues. Code: $($process.ExitCode)" }
+          Write-Host "Waiting 30 seconds for services to start..."
+          Start-Sleep -Seconds 30
 
-      - name: 3. Setup and Connect (Smart Search)
+      - name: 3. Setup and Connect (With Retry Logic)
         shell: pwsh
         run: |
-          # Secret se code nikalna
           $command = '${{ secrets.CRD_COMMAND }}'
-          if ($command -match '--code="([^"]+)"') {
-              $authCode = $matches[1]
-              Write-Host "✅ Code Mil Gaya!"
-          } else {
-              Write-Error "❌ Masla: CRD_COMMAND secret sahi nahi hai ya expire ho gaya hai!"
-              exit 1
+          if ($command -match '--code="([^"]+)"') { $authCode = $matches[1] }
+          else { Write-Error "❌ Invalid Secret!"; exit 1 }
+
+          $basePath = "C:\Program Files\Google\Chrome Remote Desktop"
+          $exeName = "remoting_start_host.exe"
+          $exePath = $null
+          $attempts = 0
+
+          # File dhoondne ki koshish (Retry 5 times)
+          while ($null -eq $exePath -and $attempts -lt 5) {
+              Write-Host "Searching for $exeName (Attempt $($attempts + 1))..."
+              if (Test-Path $basePath) {
+                  $exePath = Get-ChildItem -Path $basePath -Filter $exeName -Recurse | Select-Object -First 1 -ExpandProperty FullName
+              }
+              if ($null -eq $exePath) {
+                  $attempts++
+                  Start-Sleep -Seconds 15
+              }
           }
 
-          # EXE file ko dhoondna (Path Fix)
-          $exePath = Get-ChildItem -Path "C:\Program Files\Google\Chrome Remote Desktop\" -Filter "remoting_start_host.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (!$exePath) { Write-Error "❌ CRD Folder not found after installation!"; exit 1 }
 
-          if (!$exePath) {
-              Write-Error "❌ Chrome Remote Desktop ki file nahi mili!"
-              exit 1
-          }
-
-          # Host ko start karna
-          $params = @(
-              "--code=$authCode",
-              "--redirect-url=https://remotedesktop.google.com/_/OAuthResult",
-              "--name=GitHub-PC",
-              "--pin=${{ secrets.CRD_PIN }}"
-          )
-
-          Write-Host "Connecting to Google..."
+          Write-Host "✅ Path Found: $exePath"
+          $params = @("--code=$authCode", "--redirect-url=https://remotedesktop.google.com/_/OAuthResult", "--name=GitHub-PC", "--pin=${{ secrets.CRD_PIN }}")
           Start-Process -FilePath $exePath -ArgumentList $params -Wait
 
-      - name: 4. Desktop Par Shortcuts Banana
+      - name: 4. Create Desktop Shortcuts
         shell: pwsh
         run: |
           $publicDesktop = "C:\Users\Public\Desktop"
           $dataPath = "C:\Users\Public\BrowserData"
           if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
 
-          # Launcher Shortcut: Is se Chrome aapka purana data uthayega
-          $chromeCmd = "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run --no-default-browser-check"
-          $chromeCmd | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
-          
-          # Save & Exit Shortcut: Isay click karte hi data save hona shuru ho jayega
-          $stopCmd = "@echo off`necho Saving Data...`ntaskkill /F /IM chrome.exe /T >nul 2>&1`npowershell -Command `"New-Item -Path 'C:\exit_signal.txt' -ItemType File`""
-          $stopCmd | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
+          "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run" | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
+          "@echo off`ntaskkill /F /IM chrome.exe /T`npowershell -Command `"New-Item -Path 'C:\exit_signal.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
 
-      - name: 5. Keep Alive (6 Hours Max)
+      - name: 5. Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ Sab Ready Hai!"
-          Write-Host "1. Is link par jayen: https://remotedesktop.google.com/access"
-          Write-Host "2. 'GitHub-PC' par click karein."
-          Write-Host "3. PIN daalein: ${{ secrets.CRD_PIN }}"
-          
+          Write-Host "✅ Ready! Check: https://remotedesktop.google.com/access"
           $timeout = New-TimeSpan -Hours 6
           $sw = [diagnostics.stopwatch]::StartNew()
-          
-          # Loop tab tak chalega jab tak aap SAVE_AND_EXIT nahi dabate ya 6 ghante pure nahi hote
-          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit_signal.txt")) {
-            Start-Sleep -Seconds 30
-          }
-          Write-Host "Closing and Saving Cache..."
+          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit_signal.txt")) { Start-Sleep -Seconds 30 }
