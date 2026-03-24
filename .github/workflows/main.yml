@@ -1,77 +1,15 @@
-name: Public-Persistent-Browser-RDP
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - name: 1. Restore Chrome Session
-        uses: actions/cache@v3
-        with:
-          path: C:\Users\Public\BrowserData
-          key: chrome-session-${{ github.run_id }}
-          restore-keys: |
-            chrome-session-
-
-      - name: 2. Install Chrome Remote Desktop
-        shell: pwsh
-        run: |
-          Write-Host "Downloading CRD..."
-          $msiPath = "$env:TEMP\crd.msi"
-          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $msiPath
-          Write-Host "Installing CRD (Quiet Mode)..."
-          Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait
-          Write-Host "Waiting 45 seconds for installation to finish..."
-          Start-Sleep -Seconds 45
-
-      - name: 3. Setup and Connect (Final Fix)
-        shell: pwsh
-        run: |
-          # Secret check
-          $command = '${{ secrets.CRD_COMMAND }}'
-          if ($command -match '--code="([^"]+)"') { $authCode = $matches[1] }
-          else { Write-Error "❌ Invalid Secret! Naya code generate karein."; exit 1 }
-
-          # Searching for the EXE
-          Write-Host "Searching for remoting_start_host.exe..."
-          $exePath = Get-ChildItem -Path "C:\Program Files" -Filter "remoting_start_host.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          if (!$exePath) { $exePath = Get-ChildItem -Path "C:\Program Files (x86)" -Filter "remoting_start_host.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
-
-          if (!$exePath) { Write-Error "❌ CRD Folder not found!"; exit 1 }
-          Write-Host "✅ Path Found: $exePath"
-
-          # Connection Command
-          Write-Host "Connecting to Google Servers... Please wait."
-          & $exePath --code="$authCode" --redirect-url="https://remotedesktop.google.com/_/OAuthResult" --name="GitHub-PC" --pin="${{ secrets.CRD_PIN }}"
-
-          # Critical Wait for Server Update
-          Write-Host "Waiting 60 seconds for GitHub-PC to appear online..."
-          Start-Sleep -Seconds 60
-
-      - name: 4. Create Desktop Shortcuts
-        shell: pwsh
-        run: |
-          $publicDesktop = "C:\Users\Public\Desktop"
-          $dataPath = "C:\Users\Public\BrowserData"
-          if (!(Test-Path $dataPath)) { New-Item -Path $dataPath -ItemType Directory -Force }
-          
-          # Shortcut to open Chrome with Session Restore
-          "@echo off`nstart chrome --user-data-dir=`"$dataPath`" --no-sandbox --no-first-run --no-default-browser-check" | Out-File "$publicDesktop\OPEN_CHROME.bat" -Encoding ascii
-          
-          # Shortcut to Save and Exit
-          "@echo off`necho Saving Data...`ntaskkill /F /IM chrome.exe /T >nul 2>&1`npowershell -Command `"New-Item -Path 'C:\exit_signal.txt' -ItemType File`"" | Out-File "$publicDesktop\SAVE_AND_EXIT.bat" -Encoding ascii
-
-      - name: 5. Keep Alive (Max 6 Hours)
-        shell: pwsh
-        run: |
-          Write-Host "✅ Ready! Check: https://remotedesktop.google.com/access"
-          Write-Host "PIN: ${{ secrets.CRD_PIN }}"
-          $timeout = New-TimeSpan -Hours 6
-          $sw = [diagnostics.stopwatch]::StartNew()
-          while ($sw.Elapsed -lt $timeout -and !(Test-Path "C:\exit_signal.txt")) {
-              Write-Host "RDP Active... Time: $($sw.Elapsed.ToString('hh\:mm\:ss'))"
-              Start-Sleep -Seconds 60
-          }
-          Write-Host "Closing and Saving Session..."
+Run Write-Host "Downloading CRD..."
+Downloading CRD...
+Installing CRD (Quiet Mode)...
+Waiting 45 seconds for installation to finish...
+4m 5s
+Run # Secret check
+  
+Searching for remoting_start_host.exe...
+✅ Path Found: C:\Program Files (x86)\Google\Chrome Remote Desktop\147.0.7727.3\remoting_start_host.exe
+Connecting to Google Servers... Please wait.
+[0324/080833.072:INFO:remoting\host\setup\daemon_controller_delegate_win.cc:76] 'C:\ProgramData\Google\Chrome Remote Desktop\host_unprivileged.json' does not exist, skipping read.
+[0324/080836.081:ERROR:remoting\host\setup\host_starter_base.cc:280] Failed to exchange the authorization_code due to an OAuth error.
+Couldn't start host: OAuth error.
+Waiting 60 seconds for GitHub-PC to appear online...
+Error: Process completed with exit code 1.
